@@ -115,7 +115,7 @@ def analizar_mercado(ticker):
         return None
 
 # 2. Ejecución del Analizador en Bucle
-columnas = ["Activo", "Precio", "Régimen (200)", "Zona", "Señal RSI", "Señal MACD", "Señal Bollinger", "Señal SMA 50"]
+columnas = ["Activo", "Precio", "Régimen (200)", "Zona", "RSI", "MACD", "Bollinger", "SMA 50"]
 resultados = []
 for t in all_tickers:
     res = analizar_mercado(t)
@@ -161,8 +161,7 @@ html_content = f"""
     </style>
 </head>
 <body>
-    <h2>📊 Reporte Cuantitativo de Mercado</h2>
-    <p>Matriz de confluencia optimizada y escaneo técnico de volatilidad para BYMA y NYSE:</p>
+    <h2>Reporte Cuantitativo de Mercado</h2>
     <table>
         <thead>
             <tr>
@@ -190,7 +189,7 @@ if all([SMTP_USER, SMTP_PASSWORD, EMAIL_TO]):
     msg = MIMEMultipart()
     msg['From'] = SMTP_USER
     msg['To'] = EMAIL_TO
-    msg['Subject'] = "📈 Reporte de Confluencia Profesional (Color-Coded)"
+    msg['Subject'] = "Reporte de Confluencia"
     msg.attach(MIMEText(html_content, 'html'))
     
     try:
