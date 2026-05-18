@@ -11,12 +11,12 @@ tickers_byma = ['GGAL.BA', 'YPFD.BA', 'PAMP.BA', 'BMA.BA', 'TXAR.BA']
 all_tickers = tickers_nyse + tickers_byma
 
 def calcular_indicadores(df):
-    """Calcula las métricas técnicas sobre el DataFrame"""
-    # Tendencias (Medias Móviles)
+    """Calcula las métricas técnicas fundamentales sobre el DataFrame"""
+    # Medias Móviles de Tendencia
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
     
-    # RSI (14)
+    # RSI (14 períodos)
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -29,113 +29,157 @@ def calcular_indicadores(df):
     df['MACD'] = df['EMA_12'] - df['EMA_26']
     df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     
-    # Bandas de Bollinger (20, 2)
+    # Componentes para Bandas de Bollinger y Desviación Estándar (20 períodos)
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['Std_20'] = df['Close'].rolling(window=20).std()
-    df['BB_Upper'] = df['SMA_20'] + (2 * df['Std_20'])
-    df['BB_Lower'] = df['SMA_20'] - (2 * df['Std_20'])
     
     return df
 
 def analizar_mercado(ticker):
-    """Descarga data y desglosa las señales de cada indicador"""
+    """Descarga datos, calcula señales e interpreta métricas con formato cuantitativo"""
     try:
+        # Descargamos 1 año de data para garantizar la correcta carga de la SMA 200
         df = yf.download(ticker, period='1y', progress=False)
         if df.empty or len(df) < 200:
             return None
         
         df = calcular_indicadores(df)
         
-        # Extracción de los últimos valores en formato escalar
+        # Extracción de valores de la última fila disponible
         precio = float(df['Close'].iloc[-1])
         sma_200 = float(df['SMA_200'].iloc[-1])
         sma_50 = float(df['SMA_50'].iloc[-1])
         rsi = float(df['RSI'].iloc[-1])
         macd = float(df['MACD'].iloc[-1])
         macd_sig = float(df['MACD_Signal'].iloc[-1])
-        bb_upper = float(df['BB_Upper'].iloc[-1])
-        bb_lower = float(df['BB_Lower'].iloc[-1])
+        sma_20 = float(df['SMA_20'].iloc[-1])
+        std_20 = float(df['Std_20'].iloc[-1])
         
-        # LÓGICA DE SEÑALES INDIVIDUALES
-        
-        # 1. Régimen Macro (SMA 200)
-        regimen = "🟢 BULL" if precio > sma_200 else "🔴 BEAR"
-        
-        # 2. Señal RSI (14)
-        if rsi < 30:
-            s_rsi = "🛒 COMPRA (Sobrevendido)"
-        elif rsi > 70:
-            s_rsi = "💰 VENTA (Sobrecomprado)"
+        # 1. Formateo de Activo y Moneda según su Mercado
+        if '.BA' in ticker:
+            moneda = f"${precio:.2f}"
+            nombre_activo = ticker.replace('.BA', ' (BYMA)')
         else:
-            s_rsi = f"⏳ Neutro ({rsi:.1f})"
-            
-        # 3. Señal MACD (Cruce de líneas)
-        s_macd = "🚀 COMPRA (Cruce Alza)" if macd > macd_sig else "📉 VENTA (Cruce Baja)"
-        
-        # 4. Señal Bandas de Bollinger (Extremos de volatilidad)
-        if precio <= bb_lower:
-            s_bb = "🛒 COMPRA (Piso Banda)"
-        elif precio >= bb_upper:
-            s_bb = "💰 VENTA (Techo Banda)"
-        else:
-            s_bb = "⏳ Neutro (Dentro de Banda)"
-            
-        # 5. Señal SMA 50 (Tendencia Mediano Plazo)
-        s_sma50 = "📈 COMPRA (Arriba SMA50)" if precio > sma_50 else "📉 VENTA (Abajo SMA50)"
-        
-        # Contexto de Zona (Basado en la fuerza del RSI)
-        zona = "⚖️ Trading (Lateral)" if 40 <= rsi <= 60 else "🔥 Impulso / Tendencia"
+            moneda = f"U$D {precio:.2f}"
+            nombre_activo = f"{ticker} (NYSE)"
 
-        return {
-            "Activo": ticker.replace('.BA', ' (BYMA)') if '.BA' in ticker else f"{ticker} (NYSE)",
-            "Precio": f"${precio:.2f}",
-            "Régimen (200)": regimen,
-            "Zona": zona,
-            "Señal RSI": s_rsi,
-            "Señal MACD": s_macd,
-            "Señal Bollinger": s_bb,
-            "Señal SMA 50": s_sma50
-        }
+        # 2. Régimen de Mercado (Macro Tendencia)
+        regimen = "BULL" if precio > sma_200 else "BEAR"
+        
+        # 3. Estado de la Zona según RSI
+        zona = "Trading" if 40 <= rsi <= 60 else "Tendencia"
+        
+        # --- PROCESAMIENTO CUANTITATIVO DE SEÑALES ---
+        
+        # Señal A: RSI
+        if rsi < 30:
+            s_rsi = f"({rsi:.1f}) COMPRA"
+        elif rsi > 70:
+            s_rsi = f"({rsi:.1f}) VENTA"
+        else:
+            s_rsi = f"({rsi:.1f}) NEUTRO"
+            
+        # Señal B: MACD (Filtro de Ruido / Neutralidad si las líneas comprimen a menos de 0.05% del precio)
+        diff_macd = macd - macd_sig
+        if abs(diff_macd) < (precio * 0.0005):
+            s_macd = f"({diff_macd:+.2f}) NEUTRO"
+        elif macd > macd_sig:
+            s_macd = f"({diff_macd:+.2f}) COMPRA"
+        else:
+            s_macd = f"({diff_macd:+.2f}) VENTA"
+        
+        # Señal C: Bollinger Basado en Desviaciones Estándar (Z-Score)
+        z_score = (precio - sma_20) / std_20 if std_20 != 0 else 0
+        signo_de = "+" if z_score >= 0 else ""
+        valor_de = f"{signo_de}{z_score:.1f}DE"
+        
+        if z_score <= -2.0:
+            s_bb = f"({valor_de}) COMPRA"
+        elif z_score >= 2.0:
+            s_bb = f"({valor_de}) VENTA"
+        else:
+            s_bb = f"({valor_de}) NEUTRO"
+            
+        # Señal D: SMA 50 (Filtro de cercanía, Neutro si está a menos de 1% de la media)
+        distancia_sma50 = ((precio - sma_50) / sma_50) * 100
+        if abs(distancia_sma50) < 1.0:
+            s_sma50 = f"({distancia_sma50:+.1f}%) NEUTRO"
+        elif precio > sma_50:
+            s_sma50 = f"({distancia_sma50:+.1f}%) COMPRA"
+        else:
+            s_sma50 = f"({distancia_sma50:+.1f}%) VENTA"
+
+        return [nombre_activo, moneda, regimen, zona, s_rsi, s_macd, s_bb, s_sma50]
     except Exception as e:
-        print(f"Error procesando {ticker}: {e}")
+        print(f"Error procesando el activo {ticker}: {e}")
         return None
 
-# 2. Procesamiento en bucle
+# 2. Ejecución del Analizador en Bucle
+columnas = ["Activo", "Precio", "Régimen (200)", "Zona", "Señal RSI", "Señal MACD", "Señal Bollinger", "Señal SMA 50"]
 resultados = []
 for t in all_tickers:
     res = analizar_mercado(t)
     if res:
         resultados.append(res)
 
-df_reporte = pd.DataFrame(resultados)
+# 3. Construcción Dinámica de la Tabla HTML con Clases CSS Condicionales
+html_rows = ""
+for fila in resultados:
+    html_rows += "<tr>"
+    for i, celda in enumerate(fila):
+        clase_css = ""
+        texto_upper = str(celda).upper()
+        
+        # Aplicamos colores desde la columna Régimen (2) en adelante
+        if i >= 2: 
+            if "COMPRA" in texto_upper or "BULL" in texto_upper:
+                clase_css = ' class="bg-verde"'
+            elif "VENTA" in texto_upper or "BEAR" in texto_upper:
+                clase_css = ' class="bg-rojo"'
+            elif "NEUTRO" in texto_upper:
+                clase_css = ' class="bg-amarillo"'
+                
+        html_rows += f"<td{clase_css}>{celda}</td>"
+    html_rows += "</tr>"
 
-# 3. Formateo del Mail en HTML
-html_table = df_reporte.to_html(index=False, classes='table', border=0)
-
+# 4. Plantilla de Diseño Estilizada (Mapa de Calor Pastel)
 html_content = f"""
 <html>
 <head>
     <style>
-        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; color: #1e293b; }}
+        body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; color: #1e293b; }}
         h2 {{ color: #0f172a; border-bottom: 2px solid #3b82f6; padding-bottom: 8px; }}
         table {{ border-collapse: collapse; width: 100%; margin-top: 15px; font-size: 13px; }}
         th {{ background-color: #0f172a; color: #ffffff; padding: 10px; text-align: left; font-weight: 600; }}
-        td {{ padding: 10px; border-bottom: 1px solid #e2e8f0; }}
-        tr:nth-child(even) {{ background-color: #f8fafc; }}
+        td {{ padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: 500; color: #334155; }}
         tr:hover {{ background-color: #f1f5f9; }}
+        
+        /* Paleta Semántica de Alertas (Sin emojis) */
+        .bg-verde {{ background-color: #d1fae5 !important; color: #065f46 !important; }}
+        .bg-rojo {{ background-color: #fee2e2 !important; color: #991b1b !important; }}
+        .bg-amarillo {{ background-color: #fef9c3 !important; color: #854d0e !important; }}
     </style>
 </head>
 <body>
-    <h2>📊 Reporte Técnico de Confluencia Horaria</h2>
-    <p>Análisis individual por indicador para activos de NYSE y BYMA:</p>
-    {html_table}
+    <h2>📊 Reporte Cuantitativo de Mercado</h2>
+    <p>Matriz de confluencia optimizada y escaneo técnico de volatilidad para BYMA y NYSE:</p>
+    <table>
+        <thead>
+            <tr>
+                {"".join([f"<th>{c}</th>" for c in columnas])}
+            </tr>
+        </thead>
+        <tbody>
+            {html_rows}
+        </tbody>
+    </table>
     <br>
-    <p style="font-size: 11px; color: #94a3b8;">Generado automáticamente vía GitHub Actions.</p>
+    <p style="font-size: 11px; color: #94a3b8;">Reporte procesado automáticamente de madrugada vía GitHub Actions.</p>
 </body>
 </html>
 """
 
-# 4. Envío SMTP
+# 5. Despliegue de Envío a través del Servidor SMTP
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 SMTP_USER = os.getenv("SMTP_USER")
@@ -146,7 +190,7 @@ if all([SMTP_USER, SMTP_PASSWORD, EMAIL_TO]):
     msg = MIMEMultipart()
     msg['From'] = SMTP_USER
     msg['To'] = EMAIL_TO
-    msg['Subject'] = "📈 Reporte Multi-Indicador: Señales Desglosadas"
+    msg['Subject'] = "📈 Reporte de Confluencia Profesional (Color-Coded)"
     msg.attach(MIMEText(html_content, 'html'))
     
     try:
@@ -154,9 +198,8 @@ if all([SMTP_USER, SMTP_PASSWORD, EMAIL_TO]):
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.send_message(msg)
-        print("✉️ Reporte multi-indicador enviado correctamente.")
+        print("✉️ Reporte optimizado enviado con éxito.")
     except Exception as e:
-        print(f"❌ Error al enviar el mail: {e}")
+        print(f"❌ Error crítico en el despacho del correo: {e}")
 else:
-    print("⚠️ Variables SMTP no detectadas. Muestra en consola:")
-    print(df_reporte.to_string())
+    print("⚠️ Faltan configurar variables de entorno SMTP en los Secrets de tu GitHub.")
