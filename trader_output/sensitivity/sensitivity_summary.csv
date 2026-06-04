@@ -1,0 +1,2 @@
+best_slow,best_fast_index,best_net_profit,best_cagr,best_trades_count,sensitivity_csv,best_trades_file,best_chart
+60,0.2,2667485.717862113,0.1387924258258897,527,trader_output/sensitivity/sensitivity_portfolio.csv,trader_output/sensitivity/best_portfolio/trades_best_portfolio_s60_f0.2.csv,trader_output/equity_portfolio_best_s60_f0.2.png
