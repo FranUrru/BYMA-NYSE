@@ -577,10 +577,22 @@ def generate_html_report(data_map, trades_df_portfolio, equity_df_portfolio, per
     tabs_buttons = []
 
     for t, df in data_map.items():
+        # SOLUCIÓN TRUCO: Asegurar orden cronológico para eliminar las líneas diagonales cruzadas
+        df = df.sort_index()
+        if hasattr(df.index, 'tz') and df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+        df.index = pd.to_datetime(df.index).normalize()
+
         df_ind = compute_indicators(df.copy(), SLOW_SMA_LENGTH, max(1, int(round(FAST_SMA_INDEX * SLOW_SMA_LENGTH))), ATR_LENGTH)
         
-        # Candlestick (ensure appears as primary price plot)
-        cand = go.Candlestick(x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"], name="Price")
+        # --- CAMBIO: Serie de tiempo lineal simple para el precio en lugar de Candlestick ---
+        price_trace = go.Scatter(
+            x=df.index, 
+            y=df["Close"], 
+            mode='lines', 
+            name="Precio (Close)", 
+            line=dict(color="#1f77b4", width=2)
+        )
         
         # SMA band: fill area between SMA_fast and SMA_slow
         sma_slow = go.Scatter(x=df.index, y=df_ind["SMA_slow"], name="SMA_slow", line=dict(color="rgba(0,128,0,0.8)"))
@@ -609,11 +621,12 @@ def generate_html_report(data_map, trades_df_portfolio, equity_df_portfolio, per
         eq_df = per_ticker_equity.get(t)
         eq_trace = None
         if eq_df is not None and not eq_df.empty:
+            eq_df = eq_df.sort_index() # También ordenamos el histórico de equity por las dudas
+            if hasattr(eq_df.index, 'tz') and eq_df.index.tz is not None:
+                eq_df.index = eq_df.index.tz_localize(None)
             eq_trace = go.Scatter(x=eq_df.index, y=eq_df["equity"], name=f"Equity {t}", line=dict(color='purple'), fill='tozeroy', fillcolor='rgba(128,0,128,0.2)')
 
-        # --- SECCIÓN CORREGIDA: Configuración de subplots estilo TradingView ---
-        # Removido el specs=[[{"type":"candlestick"}], [{"type":"xy"}]] incorrecto.
-        # Definimos alturas: 70% para el precio/trades y 30% para el gráfico de equity.
+        # --- Subplots estilo TradingView ---
         fig = make_subplots(
             rows=2, 
             cols=1, 
@@ -622,8 +635,8 @@ def generate_html_report(data_map, trades_df_portfolio, equity_df_portfolio, per
             row_heights=[0.7, 0.3]
         )
         
-        # Añadir trazas de precio e indicadores a la Fila 1
-        fig.add_trace(cand, row=1, col=1)
+        # Añadir traza lineal de precio e indicadores a la Fila 1
+        fig.add_trace(price_trace, row=1, col=1)
         fig.add_trace(sma_slow, row=1, col=1)
         fig.add_trace(sma_fast, row=1, col=1)
         for mt in marker_traces:
@@ -633,18 +646,16 @@ def generate_html_report(data_map, trades_df_portfolio, equity_df_portfolio, per
         if eq_trace is not None:
             fig.add_trace(eq_trace, row=2, col=1)
 
-        # IMPORTANTE: Desactivar el deslizador de rango en el Candlestick de la fila 1
-        # para que no rompa la sincronización del eje X compartido.
-        fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
+        # Desactivar barras deslizadoras molestas
+        fig.update_xaxes(rangeslider_visible=False, type='date')
 
         # Actualizar diseño general con hover unificado en el eje X
         fig.update_layout(
             height=750, 
-            title_text=f"{t} - Precio USD y Trades",
+            title_text=f"{t} - Precio USD, Medias y Equity",
             hovermode="x unified",
             xaxis_rangeslider_visible=False
         )
-        # ----------------------------------------------------------------------
 
         div = pyo.plot(fig, output_type='div', include_plotlyjs=False)
         ticker_divs[t] = div
@@ -652,7 +663,6 @@ def generate_html_report(data_map, trades_df_portfolio, equity_df_portfolio, per
 
     # Portfolio composition: stack per-ticker equity shares proportion over portfolio equity
     comp_traces = []
-    # align dates
     all_dates = sorted(set(equity_df_portfolio.index))
     total_series = equity_df_portfolio.reindex(all_dates).ffill().bfill()['equity']
     per_ticker_series = {}
@@ -671,7 +681,6 @@ def generate_html_report(data_map, trades_df_portfolio, equity_df_portfolio, per
     for i in range(len(all_dates)):
         summed[i] = sum(per_ticker_series[t][i] for t in per_ticker_series.keys())
     cash_series = (total_series.values - np.array(summed)).tolist()
-    # put CASH at the bottom of the stack for visibility
     comp_traces.insert(0, go.Scatter(x=all_dates, y=cash_series, stackgroup='one', name='CASH', fillcolor='rgba(128,128,128,0.3)'))
 
     comp_fig = go.Figure(data=comp_traces)
@@ -682,7 +691,6 @@ def generate_html_report(data_map, trades_df_portfolio, equity_df_portfolio, per
     plotly_js = '<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>'
     html_parts = ["<html><head><meta charset='utf-8'><title>Portfolio Report</title>", plotly_js, "<style>body{font-family:Arial,Helvetica,sans-serif} .tabs{display:flex;flex-wrap:wrap;margin-bottom:10px} .tab-btn{margin:2px;padding:6px 10px;border:1px solid #ccc;cursor:pointer;background:#f7f7f7}</style></head><body>"]
     html_parts.append(f"<h2>Portfolio report</h2>")
-    # summary
     html_parts.append(f"<p>Total start: {INITIAL_CAPITAL:.2f} - Final equity: {equity_df_portfolio['equity'].iloc[-1]:.2f}</p>")
 
     # tabs
@@ -695,6 +703,7 @@ def generate_html_report(data_map, trades_df_portfolio, equity_df_portfolio, per
     for t, div in ticker_divs.items():
         html_parts.append(f'<div id="{t}" class="tab-content" style="display:none">')
         html_parts.append(div)
+        
         # add trade table for ticker
         trades_t = trades_df_portfolio[trades_df_portfolio['ticker'] == t] if not trades_df_portfolio.empty else pd.DataFrame()
         if not trades_t.empty:
